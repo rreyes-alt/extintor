@@ -38,7 +38,9 @@
     chk: '<path d="M9 6h11M9 12h11M9 18h11"/><path d="M3 6l1.5 1.5L7 5M3 12l1.5 1.5L7 11M3 18l1.5 1.5L7 17"/>',
     sync: '<path d="M20 11a8 8 0 0 0-14-5L4 8M4 13a8 8 0 0 0 14 5l2-2"/><path d="M4 3v5h5M20 21v-5h-5"/>',
     llave: '<circle cx="8" cy="15" r="4"/><path d="M11 12l9-9M17 6l3 3"/>',
-    salir: '<path d="M15 4h4v16h-4M10 8l-4 4 4 4M6 12h10"/>'
+    salir: '<path d="M15 4h4v16h-4M10 8l-4 4 4 4M6 12h10"/>',
+    doc: '<path d="M6 3h8l4 4v14H6z"/><path d="M14 3v4h4M9 12h6M9 16h6"/>',
+    clip: '<path d="M20 11l-8.5 8.5a5 5 0 0 1-7-7L13 4a3.5 3.5 0 0 1 5 5l-8.5 8.5a2 2 0 0 1-3-3L14 7"/>'
   };
   const ic = (n, extra = "") => `<svg class="ic" viewBox="0 0 24 24" ${extra}>${IC[n] || ""}</svg>`;
 
@@ -75,9 +77,10 @@
   const hayModal = () => !!$(".modal-fondo");
 
   /* ---------------- datos en memoria ---------------- */
-  const D = { ubicaciones: [], vehiculos: [], extintores: [], checklist_items: [], perfiles: [], inspecciones: [] };
+  const D = { ubicaciones: [], vehiculos: [], extintores: [], checklist_items: [], perfiles: [], inspecciones: [], documentos: [] };
   async function cargar() {
-    const [u, v, e, c, p, i] = await Promise.all(["ubicaciones", "vehiculos", "extintores", "checklist_items", "perfiles", "inspecciones"].map(t => S.all(t)));
+    const [u, v, e, c, p, i, dc] = await Promise.all(["ubicaciones", "vehiculos", "extintores", "checklist_items", "perfiles", "inspecciones", "documentos"].map(t => S.all(t)));
+    D.documentos = dc.sort((a, b) => (b.fecha || b.created_at || "").localeCompare(a.fecha || a.created_at || ""));
     D.ubicaciones = u.sort((a, b) => a.nombre.localeCompare(b.nombre));
     D.vehiculos = v.sort((a, b) => a.patente.localeCompare(b.patente));
     D.extintores = e.sort((a, b) => a.codigo.localeCompare(b.codigo, "es", { numeric: true }));
@@ -412,6 +415,7 @@
     const c = S.calcular(e);
     const seg = S.esSeguridad();
     const hist = D.inspecciones.filter(i => i.extintor_id === id);
+    const docs = D.documentos.filter(d => d.extintor_id === id);
     const alertas = [];
     const dtxt = d => d < 0 ? `venció hace ${-d} día${d === -1 ? "" : "s"}` : d === 0 ? "vence hoy" : `vence en ${d} día${d === 1 ? "" : "s"}`;
     const aviso = Number(CFG.DIAS_AVISO || 30);
@@ -456,6 +460,19 @@
           <div><div class="k">Última inspección</div><div class="v">${fechaHora(e.ultima_inspeccion)}</div></div>
           ${e.observaciones ? `<div style="grid-column:1/-1"><div class="k">Observaciones</div><div class="v">${esc(e.observaciones)}</div></div>` : ""}
         </div>
+        <div class="seccion row"><span class="grow">Documentos (${docs.length})</span></div>
+        <div class="card">
+          ${docs.length ? `<div class="lista-simple">${docs.map(d => `<div>
+            <button type="button" class="doc-abrir grow row" data-id="${d.id}" style="background:none;border:0;padding:0;text-align:left;cursor:pointer;color:inherit;min-width:0">
+              <span class="doc-ic ${(d.mime || "").includes("pdf") ? "pdf" : "img"}">${(d.mime || "").includes("pdf") ? "PDF" : "JPG"}</span>
+              <span class="grow" style="min-width:0"><b>${esc(d.tipo || "Documento")}</b>${d._pendiente ? ` <span class="badge b-amarillo">pendiente</span>` : ""}
+                <span class="muted small" style="display:block;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(d.descripcion || d.nombre || "")}</span>
+                <span class="muted small">${d.fecha ? fecha(d.fecha) : fechaHora(d.created_at)} · ${tam(d.tamano)}</span></span>
+            </button>
+            ${seg ? `<button type="button" class="btn chico doc-borrar" data-id="${d.id}" aria-label="Eliminar documento">✕</button>` : ""}
+          </div>`).join("")}</div>` : `<div class="muted">Sin documentos. Podés adjuntar la ficha técnica, certificados de recarga o PH (JPG, PNG o PDF).</div>`}
+          <button type="button" class="btn full" id="b-doc" style="margin-top:12px">${ic("clip")} Adjuntar documento</button>
+        </div>
         <div class="seccion">Historial de inspecciones (${hist.length})</div>
         <div class="card">${hist.length ? hist.map(i => `
           <details class="hist" data-id="${i.id}">
@@ -483,6 +500,15 @@
       cont.innerHTML = urls.map(u => u ? `<a class="foto" href="${u}" target="_blank" rel="noopener"><img src="${u}" alt="Foto de inspección"></a>` : `<div class="foto center small muted" style="display:grid;place-items:center">Sin señal</div>`).join("");
     }));
 
+    $("#b-doc").onclick = () => adjuntarDocumento(e);
+    $$(".doc-abrir").forEach(b => b.onclick = () => abrirDocumento(D.documentos.find(d => d.id === b.dataset.id)));
+    $$(".doc-borrar").forEach(b => b.onclick = async () => {
+      const d = D.documentos.find(x => x.id === b.dataset.id);
+      if (!d) return;
+      if (await confirmar("Eliminar documento", `¿Eliminar "${d.tipo || "documento"}${d.nombre ? " – " + d.nombre : ""}"? No se puede deshacer.`, "Eliminar")) {
+        await S.borrar("documentos", d.id, [d.ruta]); await cargar(); toast("Documento eliminado"); render();
+      }
+    });
     if (!seg) return;
     const pedirFecha = (titulo, campo, ayuda) => modal({
       titulo,
@@ -514,6 +540,76 @@
       }
     };
     vistaViva = true;
+  }
+
+  /* ================= DOCUMENTOS ================= */
+  const TIPOS_DOC = ["Ficha técnica", "Certificado de recarga", "Certificado de prueba hidráulica", "Remito / factura", "Foto", "Otro"];
+  const MAX_MB = 10;
+  const tam = b => !b ? "" : b < 1024 * 1024 ? `${Math.max(1, Math.round(b / 1024))} KB` : `${(b / 1048576).toFixed(1)} MB`;
+
+  function adjuntarDocumento(ext) {
+    let archivo = null;
+    modal({
+      titulo: `Adjuntar a ${ext.codigo}`,
+      cuerpo: `<div class="stack">
+        <label class="campo"><span>Tipo de documento</span><select id="d-tipo">${TIPOS_DOC.map(t => `<option>${t}</option>`).join("")}</select></label>
+        <label class="campo"><span>Archivo (JPG, PNG o PDF, hasta ${MAX_MB} MB)</span>
+          <input type="file" id="d-file" accept="image/*,application/pdf,.pdf"></label>
+        <div id="d-prev" class="muted small"></div>
+        <label class="campo"><span>Fecha del documento</span><input type="date" id="d-fecha" value="${S.hoyStr()}"></label>
+        <label class="campo"><span>Descripción (opcional)</span><input type="text" id="d-desc" placeholder="Ej: certificado empresa recargadora, N° 1234"></label>
+      </div>`,
+      alAbrir: el => {
+        $("#d-file", el).onchange = ev => {
+          archivo = ev.target.files[0] || null;
+          const p = $("#d-prev", el);
+          if (!archivo) { p.textContent = ""; return; }
+          const esPdf = archivo.type === "application/pdf" || /\.pdf$/i.test(archivo.name);
+          p.innerHTML = `${esc(archivo.name)} · ${tam(archivo.size)}`;
+          if (!esPdf && !archivo.type.startsWith("image/")) p.innerHTML = `<span class="error">Solo se aceptan imágenes o PDF.</span>`;
+          else if (esPdf && archivo.size > MAX_MB * 1048576) p.innerHTML = `<span class="error">El PDF supera ${MAX_MB} MB.</span>`;
+          if (esPdf && /recarga/i.test(archivo.name)) $("#d-tipo", el).value = "Certificado de recarga";
+        };
+      },
+      acciones: [{ txt: "Cancelar" }, {
+        txt: "Guardar", clase: "prim", fn: async el => {
+          if (!archivo) throw new Error("Elegí un archivo");
+          const esPdf = archivo.type === "application/pdf" || /\.pdf$/i.test(archivo.name);
+          if (!esPdf && !archivo.type.startsWith("image/")) throw new Error("Solo se aceptan imágenes o PDF");
+          let blob = archivo, nombre = archivo.name;
+          if (esPdf) {
+            if (archivo.size > MAX_MB * 1048576) throw new Error(`El PDF supera ${MAX_MB} MB`);
+            if (!archivo.type) blob = new Blob([archivo], { type: "application/pdf" });
+          } else {
+            blob = await comprimir(archivo, 2000, 0.8);
+            nombre = nombre.replace(/\.[^.]+$/, "") + ".jpg";
+          }
+          await S.guardarDocumento({
+            extintor_id: ext.id, tipo: $("#d-tipo", el).value, nombre,
+            descripcion: $("#d-desc", el).value.trim() || null, fecha: $("#d-fecha", el).value || null
+          }, blob);
+          await cargar();
+          toast(S.DEMO || navigator.onLine ? "Documento adjuntado" : "Guardado. Se sube cuando haya señal", 3200);
+          render();
+        }
+      }]
+    });
+  }
+
+  async function abrirDocumento(d) {
+    if (!d) return;
+    const url = await S.urlFoto(d.ruta);
+    if (!url) return toast("Para ver este documento hace falta conexión", 3500);
+    const esPdf = (d.mime || "").includes("pdf");
+    modal({
+      titulo: d.tipo || "Documento",
+      cuerpo: `<p class="muted small" style="margin-top:0">${esc(d.nombre || "")}${d.descripcion ? " · " + esc(d.descripcion) : ""}<br>
+          ${d.fecha ? "Fecha: " + fecha(d.fecha) + " · " : ""}Subido por ${esc(d.subido_por_nombre || "—")}</p>
+        ${esPdf ? `<div class="alerta azul">${ic("doc")}<span>Documento PDF (${tam(d.tamano)})</span></div>`
+                : `<img src="${url}" alt="${esc(d.tipo || "Documento")}" style="width:100%;border-radius:12px;display:block">`}
+        <a class="btn prim full" href="${url}" target="_blank" rel="noopener" style="margin-top:14px">${esPdf ? "Abrir PDF" : "Ver en tamaño completo"}</a>`,
+      acciones: [{ txt: "Cerrar" }]
+    });
   }
 
   /* ================= ALTA / EDICIÓN ================= */
@@ -654,7 +750,7 @@
         </div>
         <div class="seccion">Fotos (1 a 2)</div>
         <div class="card"><div class="fotos" id="fotos"></div>
-          <input type="file" id="in-foto" accept="image/*" capture="environment" class="hidden"></div>
+          <input type="file" id="in-foto" accept="image/*" class="hidden"></div>
         <div class="seccion">Observaciones</div>
         <textarea id="obs" placeholder="Obligatorio si algún ítem está No OK"></textarea>
         <div class="error" id="i-err" style="margin-top:10px"></div>
@@ -675,7 +771,7 @@
     $("#todo-ok").onclick = () => $$(".item-chk").forEach(d => d._set(true));
     const pintarFotos = () => {
       $("#fotos").innerHTML = fotos.map((f, i) => `<div class="foto"><img src="${f.url}" alt="Foto ${i + 1}"><button type="button" class="quitar" data-i="${i}" aria-label="Quitar">✕</button></div>`).join("") +
-        (fotos.length < 2 ? `<button type="button" class="foto-add" id="add-foto">${ic("camara")}<br>Agregar foto</button>` : "");
+        (fotos.length < 2 ? `<button type="button" class="foto-add" id="add-foto">${ic("camara")}<br>Cámara o galería</button>` : "");
       $$(".quitar").forEach(b => b.onclick = () => { URL.revokeObjectURL(fotos[+b.dataset.i].url); fotos.splice(+b.dataset.i, 1); pintarFotos(); });
       const a = $("#add-foto"); if (a) a.onclick = () => $("#in-foto").click();
     };
@@ -795,7 +891,7 @@
           ${S.DEMO ? "" : `<button class="btn full" id="b-clave">${ic("llave")} Cambiar contraseña</button>`}
           <button class="btn full peligro" id="b-salir">${ic("salir")} ${S.DEMO ? "Cambiar de rol" : "Cerrar sesión"}</button>
         </div>
-        <p class="muted small center" style="margin-top:20px">Control de Extintores · v1.0</p>`
+        <p class="muted small center" style="margin-top:20px">Control de Extintores · v1.1.1</p>`
     });
     const bs = $("#b-sync"); if (bs) bs.onclick = () => S.sync(true);
     $$("[data-desc]").forEach(b => b.onclick = async () => {

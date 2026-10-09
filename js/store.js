@@ -7,7 +7,8 @@
 
   const CFG = window.APP_CONFIG || {};
   const DEMO = !CFG.SUPABASE_URL || !CFG.SUPABASE_ANON_KEY;
-  const TABLAS = ["ubicaciones", "vehiculos", "extintores", "checklist_items", "perfiles"];
+  const TABLAS = ["ubicaciones", "vehiculos", "extintores", "checklist_items", "perfiles", "documentos"];
+  const OPCIONALES = ["documentos"]; // si la tabla todavía no existe en Supabase, se ignora
   const STORES = [...TABLAS, "inspecciones"];
 
   /* ---------------- utilidades ---------------- */
@@ -27,7 +28,7 @@
   function abrir() {
     if (_db) return Promise.resolve(_db);
     return new Promise((res, rej) => {
-      const req = indexedDB.open("extintores-app", 1);
+      const req = indexedDB.open("extintores-app", 2);
       req.onupgradeneeded = () => {
         const db = req.result;
         STORES.forEach(s => db.objectStoreNames.contains(s) || db.createObjectStore(s, { keyPath: "id" }));
@@ -145,6 +146,23 @@
     } else if (op.op === "update") {
       const { error } = await sb.from(op.tabla).update(op.cambios).eq("id", op.id);
       if (error) throw error;
+    } else if (op.op === "documento") {
+      const doc = await idbGet("documentos", op.id);
+      if (!doc) return;
+      const blob = await idbGet("fotos", doc.ruta);
+      if (blob) {
+        const { error } = await sb.storage.from("fotos").upload(doc.ruta, blob, { upsert: true, contentType: doc.mime || blob.type });
+        if (error && !/exists/i.test(error.message)) throw error;
+      }
+      const { error } = await sb.from("documentos").upsert(limpiar(doc));
+      if (error) throw error;
+      doc._pendiente = false;
+      await idbPut("documentos", doc);
+      await idbDel("fotos", doc.ruta);
+    } else if (op.op === "borrar") {
+      const { error } = await sb.from(op.tabla).delete().eq("id", op.id);
+      if (error) throw error;
+      if (op.rutas && op.rutas.length) await sb.storage.from("fotos").remove(op.rutas);
     } else if (op.op === "inspeccion") {
       const insp = await idbGet("inspecciones", op.id);
       if (!insp) return;
@@ -179,8 +197,14 @@
 
   async function bajar() {
     const cola = await idbAll("outbox");
+    const pendDocs = (await idbAll("documentos")).filter(d => d._pendiente);
     for (const t of TABLAS) {
-      const filas = await traerTodo(t);
+      let filas;
+      try { filas = await traerTodo(t); }
+      catch (e) {
+        if (OPCIONALES.includes(t) && !esErrorDeRed(e)) { filas = []; }
+        else throw e;
+      }
       await idbClear(t);
       await idbPutMany(t, filas);
     }
@@ -199,6 +223,8 @@
       }
     }
     for (const i of pendLocales) await aplicarInspeccionLocal(i);
+    await idbPutMany("documentos", pendDocs);
+    for (const op of cola) if (op.op === "borrar") await idbDel(op.tabla, op.id);
   }
 
   async function aplicarInspeccionLocal(insp) {
@@ -362,6 +388,36 @@
       const r = await idbGet(tabla, id);
       if (r) await idbPut(tabla, Object.assign(r, cambios));
       if (!DEMO) { await idbPut("outbox", { op: "update", tabla, id, cambios, creado: ahoraISO() }); programarSync(); }
+      await contarPendientes(); emitir();
+    },
+
+    async guardarDocumento(doc, blob) {
+      doc.id = doc.id || uuid();
+      const ext = (doc.nombre.split(".").pop() || "bin").toLowerCase().replace(/[^a-z0-9]/g, "").slice(0, 5) || "bin";
+      doc.ruta = `docs/${doc.extintor_id}/${doc.id}.${ext}`;
+      doc.mime = blob.type || (ext === "pdf" ? "application/pdf" : "image/jpeg");
+      doc.tamano = blob.size;
+      doc.subido_por = this.usuario.id;
+      doc.subido_por_nombre = (this.perfil && this.perfil.nombre) || this.usuario.email;
+      doc.created_at = ahoraISO();
+      doc._pendiente = !DEMO;
+      await idbPut("fotos", blob, doc.ruta);
+      await idbPut("documentos", doc);
+      if (!DEMO) { await idbPut("outbox", { op: "documento", id: doc.id, creado: ahoraISO() }); programarSync(); }
+      await contarPendientes(); emitir();
+      return doc;
+    },
+
+    async borrar(tabla, id, rutas = []) {
+      await idbDel(tabla, id);
+      for (const r of rutas) await idbDel("fotos", r);
+      if (!DEMO) {
+        // si todavía no se había subido, alcanza con sacarlo de la cola
+        const cola = await idbAll("outbox");
+        const pend = cola.find(o => o.id === id && (o.op === "documento" || o.op === "upsert"));
+        if (pend) await idbDel("outbox", pend.seq);
+        else { await idbPut("outbox", { op: "borrar", tabla, id, rutas, creado: ahoraISO() }); programarSync(); }
+      }
       await contarPendientes(); emitir();
     },
 
