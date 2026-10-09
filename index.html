@@ -9,19 +9,25 @@
   <link rel="manifest" href="manifest.webmanifest">
   <link rel="icon" href="icons/icon-192.png">
   <link rel="apple-touch-icon" href="icons/icon-192.png">
-  <link rel="stylesheet" href="css/styles.css">
+  <link rel="stylesheet" href="css/styles.css?v=1.1.1">
 </head>
 <body>
   <div id="app"></div>
   <div id="toast" role="status" aria-live="polite"></div>
 
-  <script src="js/config.js"></script>
+  <script src="js/config.js?v=1.1.1"></script>
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
-  <script src="js/store.js"></script>
-  <script src="js/app.js"></script>
+  <script src="js/store.js?v=1.1.1"></script>
+  <script src="js/app.js?v=1.1.1"></script>
   <script>
     if ("serviceWorker" in navigator && location.protocol.startsWith("http")) {
-      window.addEventListener("load", () => navigator.serviceWorker.register("sw.js").catch(() => {}));
+      // Al publicar una versión nueva, la app se actualiza sola y recarga una vez.
+      const habiaVersion = !!navigator.serviceWorker.controller;
+      let recargado = false;
+      navigator.serviceWorker.addEventListener("controllerchange", () => { if (habiaVersion && !recargado) { recargado = true; location.reload(); } });
+      window.addEventListener("load", () => navigator.serviceWorker.register("sw.js", { updateViaCache: "none" })
+        .then(reg => { reg.update(); document.addEventListener("visibilitychange", () => { if (!document.hidden) reg.update(); }); })
+        .catch(() => {}));
     }
   </script>
 </body>

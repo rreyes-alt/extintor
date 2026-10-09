@@ -1,7 +1,7 @@
 /* Service worker: deja la app disponible sin señal. */
-const VERSION = "ext-v1.0.0";
+const VERSION = "ext-v1.1.1";
 const APP = [
-  "./", "index.html", "css/styles.css", "js/config.js", "js/store.js", "js/app.js",
+  "./", "index.html",
   "manifest.webmanifest", "icons/icon-192.png", "icons/icon-512.png",
   "https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"
 ];
@@ -26,7 +26,7 @@ self.addEventListener("fetch", ev => {
   // Archivos de la app: red primero (para recibir actualizaciones), caché si no hay señal
   if (propio) {
     ev.respondWith(
-      fetch(req).then(res => {
+      fetch(req.url, { cache: "no-cache" }).then(res => {
         const copia = res.clone();
         caches.open(VERSION).then(c => c.put(req, copia));
         return res;
