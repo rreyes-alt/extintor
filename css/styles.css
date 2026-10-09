@@ -273,3 +273,9 @@ input:focus, select:focus, textarea:focus { border-color: var(--brand); box-shad
 
 #mapa { height: 340px; border-radius: var(--radio); overflow: hidden; border: 1px solid var(--line); z-index: 0; }
 .vacio { text-align: center; padding: 36px 16px; color: var(--ink-2); }
+
+/* ---- documentos ---- */
+.doc-ic { flex: none; width: 42px; height: 48px; border-radius: 8px; display: grid; place-items: center; font-size: .72rem; font-weight: 800; letter-spacing: .04em; }
+.doc-ic.pdf { background: var(--rojo-bg); color: var(--rojo); }
+.doc-ic.img { background: var(--azul-bg); color: var(--azul); }
+.lista-simple .doc-abrir { gap: 12px; }
