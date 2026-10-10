@@ -3,9 +3,10 @@
 //   • Vencidos y observados: aviso TODOS los días hasta que se actualicen.
 //   • Próximos a vencer (≤ 30 días) e inspecciones atrasadas: aviso los
 //     lunes, y además el día en que un extintor entra en los 30 días.
-// Variables (GitHub > Settings > Secrets and variables > Actions):
-//   SUPABASE_URL, SUPABASE_SERVICE_KEY, SMTP_HOST, SMTP_PORT, SMTP_USER,
-//   SMTP_PASS, MAIL_FROM (opcional), APP_URL (opcional), DIAS_AVISO (opc.)
+// Secrets obligatorios (GitHub > Settings > Secrets and variables > Actions):
+//   SUPABASE_SERVICE_KEY, SMTP_USER, SMTP_PASS
+// Opcionales: SMTP_HOST (def. smtp.gmail.com), SMTP_PORT (def. 465), MAIL_FROM
+// SUPABASE_URL y APP_URL vienen fijados en .github/workflows/alarmas.yml
 // =====================================================================
 import nodemailer from "nodemailer";
 
@@ -17,7 +18,10 @@ const APP = env.APP_URL || "";
 if (!URL_SB || !KEY) { console.error("Faltan SUPABASE_URL o SUPABASE_SERVICE_KEY"); process.exit(1); }
 
 async function rest(path) {
-  const r = await fetch(`${URL_SB}/rest/v1/${path}`, { headers: { apikey: KEY, Authorization: `Bearer ${KEY}` } });
+  // Las claves nuevas de Supabase (sb_secret_...) van solo en "apikey"; las viejas (eyJ...) también como Bearer.
+  const headers = { apikey: KEY };
+  if (KEY.startsWith("eyJ")) headers.Authorization = `Bearer ${KEY}`;
+  const r = await fetch(`${URL_SB}/rest/v1/${path}`, { headers });
   if (!r.ok) throw new Error(`${path}: ${r.status} ${await r.text()}`);
   return r.json();
 }
@@ -89,11 +93,12 @@ const html = `<div style="max-width:720px">
   ${APP ? `<br><a href="${APP}">Abrir la app</a>` : ""}</p></div>`;
 
 const asunto = `[Extintores] ${vencidos.length} vencidos · ${observados.length} observados · ${proximos.length} por vencer`;
+if (!env.SMTP_USER || !env.SMTP_PASS) { console.error("Faltan los secrets SMTP_USER o SMTP_PASS"); process.exit(1); }
 const tx = nodemailer.createTransport({
   host: env.SMTP_HOST || "smtp.gmail.com",
   port: Number(env.SMTP_PORT || 465),
   secure: Number(env.SMTP_PORT || 465) === 465,
   auth: { user: env.SMTP_USER, pass: env.SMTP_PASS }
 });
-await tx.sendMail({ from: env.MAIL_FROM || env.SMTP_USER, to: perfiles.map(p => p.email).join(","), subject: asunto, html });
+await tx.sendMail({ from: env.MAIL_FROM || `Control de Extintores <${env.SMTP_USER}>`, to: perfiles.map(p => p.email).join(","), subject: asunto, html });
 console.log(`${hoy}: mail enviado a ${perfiles.length} destinatario(s). ${asunto}`);
