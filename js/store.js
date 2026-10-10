@@ -254,7 +254,8 @@
     await idbPutMany("ubicaciones", [
       { id: u.bn, nombre: "Base Norte", tipo: "Base", direccion: "Ruta 7 km 1200", lat: -38.9516, lng: -68.0591, activo: true },
       { id: u.bs, nombre: "Base Sur", tipo: "Base", direccion: "Parque industrial, lote 14", lat: -39.0333, lng: -67.5833, activo: true },
-      { id: u.tc, nombre: "Taller Central", tipo: "Taller", direccion: "Av. Principal 2450", lat: -38.9700, lng: -68.1200, activo: true }
+      { id: u.tc, nombre: "Taller Central", tipo: "Taller", direccion: "Av. Principal 2450", lat: -38.9700, lng: -68.1200, activo: true },
+      { id: uuid(), nombre: "Campo Loma Norte", tipo: "Campo", direccion: "Locación de pozos, acceso por ruta 151", lat: -38.7800, lng: -68.2500, activo: true }
     ]);
     const v = { p1: uuid(), p2: uuid(), t1: uuid() };
     await idbPutMany("vehiculos", [

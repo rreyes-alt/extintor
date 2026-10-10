@@ -1,5 +1,5 @@
 /* Service worker: deja la app disponible sin señal. */
-const VERSION = "ext-v1.1.1";
+const VERSION = "ext-v1.2.0";
 const APP = [
   "./", "index.html",
   "manifest.webmanifest", "icons/icon-192.png", "icons/icon-512.png",

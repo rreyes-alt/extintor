@@ -39,6 +39,7 @@
     sync: '<path d="M20 11a8 8 0 0 0-14-5L4 8M4 13a8 8 0 0 0 14 5l2-2"/><path d="M4 3v5h5M20 21v-5h-5"/>',
     llave: '<circle cx="8" cy="15" r="4"/><path d="M11 12l9-9M17 6l3 3"/>',
     salir: '<path d="M15 4h4v16h-4M10 8l-4 4 4 4M6 12h10"/>',
+    baja: '<circle cx="12" cy="12" r="9"/><path d="M8 12h8"/>',
     doc: '<path d="M6 3h8l4 4v14H6z"/><path d="M14 3v4h4M9 12h6M9 16h6"/>',
     clip: '<path d="M20 11l-8.5 8.5a5 5 0 0 1-7-7L13 4a3.5 3.5 0 0 1 5 5l-8.5 8.5a2 2 0 0 1-3-3L14 7"/>'
   };
@@ -75,6 +76,10 @@
   });
   const datosForm = form => Object.fromEntries(new FormData(form).entries());
   const hayModal = () => !!$(".modal-fondo");
+
+  /* ---------------- tipos de ubicación ---------------- */
+  const TIPOS_FIJOS = ["Base", "Taller", "Campo"];          // ubicaciones con lugar fijo (van al mapa)
+  const TIPOS_UBIC = [...TIPOS_FIJOS, "Pickup", "Trailer"];  // todos los tipos de un extintor
 
   /* ---------------- datos en memoria ---------------- */
   const D = { ubicaciones: [], vehiculos: [], extintores: [], checklist_items: [], perfiles: [], inspecciones: [], documentos: [] };
@@ -188,6 +193,7 @@
     const uid = await leerNFC();
     if (!uid) return;
     const ext = D.extintores.find(e => (e.nfc_uid || "").toUpperCase() === uid);
+    if (ext && ext.estado === "Baja") { toast(`${ext.codigo} está dado de baja`, 3500); location.hash = `#/extintor/${ext.id}`; return; }
     if (ext) { location.hash = `#/inspeccion/${ext.id}?nfc=1`; return; }
     if (!S.esSeguridad()) {
       modal({ titulo: "Etiqueta sin vincular", cuerpo: `<p>La etiqueta <span class="mono">${esc(uid)}</span> no está asociada a ningún extintor. Avisale a Seguridad.</p>`, acciones: [{ txt: "Cerrar", clase: "prim" }] });
@@ -389,7 +395,7 @@
         <div class="row" style="margin:4px 0 10px">
           <select id="sel-tipo" class="grow" style="min-height:42px">
             <option value="">Todas las ubicaciones</option>
-            ${["Base", "Taller", "Pickup", "Trailer"].map(t => `<option ${tipo === t ? "selected" : ""}>${t}</option>`).join("")}
+            ${TIPOS_UBIC.map(t => `<option ${tipo === t ? "selected" : ""}>${t}</option>`).join("")}
           </select>
         </div>
         ${extra ? `<div class="alerta azul" style="margin-bottom:10px"><span class="grow">Filtrado por: ${esc(extra)}</span><a href="${qs(u ? "ubic" : "veh", "")}">Quitar</a></div>` : ""}
@@ -419,9 +425,11 @@
     const alertas = [];
     const dtxt = d => d < 0 ? `venció hace ${-d} día${d === -1 ? "" : "s"}` : d === 0 ? "vence hoy" : `vence en ${d} día${d === 1 ? "" : "s"}`;
     const aviso = Number(CFG.DIAS_AVISO || 30);
-    if (!c.activo) alertas.push(["azul", `Estado: ${e.estado}. No genera alarmas.`]);
-    if (c.dCarga !== null && c.dCarga <= aviso) alertas.push([c.dCarga < 0 ? "rojo" : "amarillo", `Carga: ${dtxt(c.dCarga)} (${fecha(c.vencCarga)})`]);
-    if (c.dPh !== null && c.dPh <= aviso) alertas.push([c.dPh < 0 ? "rojo" : "amarillo", `Prueba hidráulica: ${dtxt(c.dPh)} (${fecha(c.vencPh)})`]);
+    const deBaja = e.estado === "Baja";
+    if (deBaja) alertas.push(["rojo", `Dado de baja${e.fecha_baja ? " el " + fecha(e.fecha_baja) : ""}${e.motivo_baja ? " · " + e.motivo_baja : ""}. No genera alarmas.`]);
+    else if (!c.activo) alertas.push(["azul", `Estado: ${e.estado}. No genera alarmas.`]);
+    if (!deBaja && c.dCarga !== null && c.dCarga <= aviso) alertas.push([c.dCarga < 0 ? "rojo" : "amarillo", `Carga: ${dtxt(c.dCarga)} (${fecha(c.vencCarga)})`]);
+    if (!deBaja && c.dPh !== null && c.dPh <= aviso) alertas.push([c.dPh < 0 ? "rojo" : "amarillo", `Prueba hidráulica: ${dtxt(c.dPh)} (${fecha(c.vencPh)})`]);
     if (c.observado) alertas.push(["rojo", "Observado en la última inspección"]);
     if (c.activo && c.atrasada) alertas.push(["amarillo", e.ultima_inspeccion ? `Inspección atrasada: última hace ${c.diasDesdeInsp} días` : "Nunca fue inspeccionado"]);
     if (c.venc === "sin_datos") alertas.push(["amarillo", "Faltan fechas de recarga o PH"]);
@@ -436,13 +444,15 @@
           <div style="margin-top:14px">${alertas.map(([k, t]) => `<div class="alerta ${k}">${ic(k === "verde" ? "ok" : "alerta")}<span>${esc(t)}</span></div>`).join("")}</div>
         </div>
         <div class="acciones" style="margin-top:12px">
-          <a class="btn prim full2" href="#/inspeccion/${e.id}">${ic("chk")} Inspeccionar sin NFC</a>
-          ${seg ? `
+          ${deBaja ? "" : `<a class="btn prim full2" href="#/inspeccion/${e.id}">${ic("chk")} Inspeccionar sin NFC</a>`}
+          ${seg && deBaja ? `<button class="btn full2" id="b-reactivar">${ic("sync")} Reactivar extintor</button>` : ""}
+          ${seg && !deBaja ? `
             <button class="btn" id="b-recarga">Registrar recarga</button>
             <button class="btn" id="b-ph">Registrar PH</button>
             <button class="btn" id="b-nfc">${ic("nfc")} ${e.nfc_uid ? "Cambiar NFC" : "Vincular NFC"}</button>
             <a class="btn" href="#/editar/${e.id}">Editar ficha</a>
-            ${c.observado ? `<button class="btn full2" id="b-resolver">${ic("ok")} Marcar observación resuelta</button>` : ""}` : ""}
+            ${c.observado ? `<button class="btn full2" id="b-resolver">${ic("ok")} Marcar observación resuelta</button>` : ""}
+            <button class="btn peligro full2" id="b-baja">${ic("baja")} Dar de baja</button>` : ""}
         </div>
         <div class="seccion">Ficha técnica</div>
         <div class="card datos">
@@ -521,6 +531,38 @@
           const cambios = { [campo]: v };
           const ch = $("#f-activo", el); if (ch && ch.checked) cambios.estado = "Activo";
           await S.update("extintores", e.id, cambios); toast("Guardado");
+        }
+      }]
+    });
+    const bReac = $("#b-reactivar");
+    if (bReac) {
+      bReac.onclick = async () => {
+        if (await confirmar("Reactivar extintor", `${e.codigo} vuelve a estado Activo y a generar alarmas. Revisá que las fechas de recarga y PH estén al día.`, "Reactivar")) {
+          await S.update("extintores", e.id, { estado: "Activo", fecha_baja: null, motivo_baja: null }); toast("Extintor reactivado");
+        }
+      };
+      vistaViva = true;
+      return;
+    }
+    $("#b-baja").onclick = () => modal({
+      titulo: `Dar de baja ${e.codigo}`,
+      cuerpo: `<div class="stack">
+        <p style="margin:0">El extintor deja de aparecer en las listas y no genera más alarmas. Su historial, fotos y documentos se conservan, y se puede reactivar.</p>
+        <label class="campo"><span>Motivo *</span><select id="b-motivo"><option value="">Elegir…</option>${MOTIVOS_BAJA.map(m => `<option>${m}</option>`).join("")}</select></label>
+        <label class="campo"><span>Fecha de baja</span><input type="date" id="b-fecha" value="${S.hoyStr()}" max="${S.hoyStr()}"></label>
+        <label class="campo"><span>Detalle (opcional)</span><input type="text" id="b-det" placeholder="Ej: cilindro con corrosión en la base"></label>
+        ${e.nfc_uid ? `<label class="check"><input type="checkbox" id="b-nfc-lib" checked> Liberar la etiqueta NFC para usarla en otro extintor</label>` : ""}
+      </div>`,
+      acciones: [{ txt: "Cancelar" }, {
+        txt: "Dar de baja", clase: "prim", fn: async el => {
+          const motivo = $("#b-motivo", el).value;
+          if (!motivo) throw new Error("Elegí el motivo de la baja");
+          const det = $("#b-det", el).value.trim();
+          const cambios = { estado: "Baja", fecha_baja: $("#b-fecha", el).value || S.hoyStr(), motivo_baja: det ? `${motivo}: ${det}` : motivo, observado: false };
+          const lib = $("#b-nfc-lib", el);
+          if (lib && lib.checked) cambios.nfc_uid = null;
+          await S.update("extintores", e.id, cambios);
+          toast(`${e.codigo} dado de baja`);
         }
       }]
     });
@@ -615,6 +657,7 @@
   /* ================= ALTA / EDICIÓN ================= */
   const AGENTES = ["ABC (polvo)", "BC (polvo)", "CO2", "Agua", "Espuma AFFF", "Clase K", "HCFC / Halotron"];
   const ESTADOS = ["Activo", "En recarga", "Fuera de servicio", "Baja"];
+  const MOTIVOS_BAJA = ["Vencido sin posibilidad de recarga", "Falla en prueba hidráulica", "Dañado / corroído", "Reemplazado por otro equipo", "Extraviado o robado", "Vendido o devuelto", "Otro"];
   function pantallaEditar(id) {
     const nuevo = id === "nuevo";
     const e = nuevo ? { meses_recarga: 12, meses_ph: 60, frecuencia_dias: 30, estado: "Activo", tipo_ubicacion: "Base" } : D.extintores.find(x => x.id === id);
@@ -647,12 +690,12 @@
           <label class="campo"><span>Última PH *</span><input type="date" name="ultima_ph" value="${esc(e.ultima_ph || "")}" required></label>
           <label class="campo"><span>PH cada (meses)</span><input type="number" min="1" name="meses_ph" value="${esc(e.meses_ph ?? 60)}"></label>
         </div>
-        <label class="campo"><span>Tipo de ubicación *</span><select name="tipo_ubicacion" id="sel-tu">${opt(["Base", "Taller", "Pickup", "Trailer"], e.tipo_ubicacion)}</select></label>
-        <label class="campo" id="c-ubic"><span>Base o taller *</span><select name="ubicacion_id"><option value="">Elegir…</option>
+        <label class="campo"><span>Tipo de ubicación *</span><select name="tipo_ubicacion" id="sel-tu">${opt(TIPOS_UBIC, e.tipo_ubicacion)}</select></label>
+        <label class="campo" id="c-ubic"><span>Base, taller o campo *</span><select name="ubicacion_id"><option value="">Elegir…</option>
           ${D.ubicaciones.filter(u => u.activo !== false).map(u => `<option value="${u.id}" data-tipo="${u.tipo}" ${u.id === e.ubicacion_id ? "selected" : ""}>${esc(u.nombre)} (${u.tipo})</option>`).join("")}</select></label>
         <label class="campo" id="c-veh"><span>Patente *</span><select name="vehiculo_id"><option value="">Elegir…</option>
           ${D.vehiculos.filter(v => v.activo !== false).map(v => `<option value="${v.id}" data-tipo="${v.tipo}" ${v.id === e.vehiculo_id ? "selected" : ""}>${esc(v.patente)} — ${esc(v.descripcion || v.tipo)}</option>`).join("")}</select></label>
-        <p class="muted small" style="margin-top:4px">¿Falta una base o patente? Cargala en Más → Ubicaciones / Vehículos.</p>
+        <p class="muted small" style="margin-top:4px">¿Falta una base, campo o patente? Cargala en Más → Ubicaciones / Vehículos.</p>
         <label class="campo"><span>Sector o posición</span><input type="text" name="sector" value="${esc(e.sector || "")}" placeholder="Depósito, cabina, ingreso…"></label>
         <div class="grid2">
           <label class="campo"><span>Inspección *</span><select name="frecuencia_dias"><option value="15" ${e.frecuencia_dias == 15 ? "selected" : ""}>Quincenal</option><option value="30" ${e.frecuencia_dias != 15 ? "selected" : ""}>Mensual</option></select></label>
@@ -693,7 +736,7 @@
       for (const k in req) if (!String(f[k] || "").trim()) return err(`Falta: ${req[k]}`);
       const movil = f.tipo_ubicacion === "Pickup" || f.tipo_ubicacion === "Trailer";
       if (movil && !f.vehiculo_id) return err("Elegí la patente");
-      if (!movil && !f.ubicacion_id) return err("Elegí la base o taller");
+      if (!movil && !f.ubicacion_id) return err("Elegí la base, taller o campo");
       const codigo = f.codigo.trim().toUpperCase();
       if (D.extintores.some(x => x.codigo.toUpperCase() === codigo && x.id !== e.id)) return err("Ya existe un extintor con ese código");
       const datos = {
@@ -704,6 +747,8 @@
         sector: f.sector.trim() || null, frecuencia_dias: Number(f.frecuencia_dias), estado: f.estado,
         observaciones: f.observaciones.trim() || null, nfc_uid: nfc || null
       };
+      if (f.estado === "Baja" && e.estado !== "Baja") { datos.fecha_baja = S.hoyStr(); datos.motivo_baja = e.motivo_baja || "Otro"; }
+      if (f.estado !== "Baja" && e.estado === "Baja") { datos.fecha_baja = null; datos.motivo_baja = null; }
       if (nuevo) {
         const r = await S.save("extintores", Object.assign({ observado: false, ultima_inspeccion: null }, datos));
         toast("Extintor dado de alta");
@@ -834,7 +879,7 @@
     marco({
       titulo: "Mapa",
       cuerpo: `<div id="mapa"><div class="vacio">Cargando mapa…</div></div>
-        <div class="seccion">Bases y talleres</div>
+        <div class="seccion">Bases, talleres y campos</div>
         ${fijas.map(x => fila(`#/extintores?ubic=${x.u.id}`, "pin", x.u.nombre, `${x.u.tipo}${x.u.direccion ? " · " + x.u.direccion : ""}${x.u.lat == null ? " · sin coordenadas" : ""}`, x.r)).join("") || `<div class="muted">No hay ubicaciones cargadas.</div>`}
         <div class="seccion">Vehículos</div>
         ${moviles.map(x => fila(`#/extintores?veh=${x.v.id}`, "camion", x.v.patente, `${x.v.tipo}${x.v.descripcion ? " · " + x.v.descripcion : ""}${x.v.base_id && ubic(x.v.base_id) ? " · " + ubic(x.v.base_id).nombre : ""}`, x.r)).join("") || `<div class="muted">No hay vehículos cargados.</div>`}`
@@ -881,7 +926,7 @@
         <div class="seccion">Administración</div>
         <div class="card lista-simple">
           <div><a class="grow row" href="#/admin/usuarios" style="color:inherit;text-decoration:none">${ic("usuarios")} Usuarios</a></div>
-          <div><a class="grow row" href="#/admin/ubicaciones" style="color:inherit;text-decoration:none">${ic("pin")} Ubicaciones (bases y talleres)</a></div>
+          <div><a class="grow row" href="#/admin/ubicaciones" style="color:inherit;text-decoration:none">${ic("pin")} Ubicaciones (bases, talleres y campos)</a></div>
           <div><a class="grow row" href="#/admin/vehiculos" style="color:inherit;text-decoration:none">${ic("camion")} Vehículos (pickups y trailers)</a></div>
           <div><a class="grow row" href="#/admin/checklist" style="color:inherit;text-decoration:none">${ic("chk")} Ítems del checklist</a></div>
           <div><a class="grow row" href="#/exportar" style="color:inherit;text-decoration:none">${ic("descarga")} Exportar a Excel</a></div>
@@ -891,7 +936,7 @@
           ${S.DEMO ? "" : `<button class="btn full" id="b-clave">${ic("llave")} Cambiar contraseña</button>`}
           <button class="btn full peligro" id="b-salir">${ic("salir")} ${S.DEMO ? "Cambiar de rol" : "Cerrar sesión"}</button>
         </div>
-        <p class="muted small center" style="margin-top:20px">Control de Extintores · v1.1.1</p>`
+        <p class="muted small center" style="margin-top:20px">Control de Extintores · v1.2.0</p>`
     });
     const bs = $("#b-sync"); if (bs) bs.onclick = () => S.sync(true);
     $$("[data-desc]").forEach(b => b.onclick = async () => {
@@ -986,7 +1031,7 @@
       cuerpo: `<div class="card lista-simple">${D.ubicaciones.map(u => `<div>
           <div class="grow"><b>${esc(u.nombre)}</b> <span class="badge b-gris">${u.tipo}</span>${u.activo === false ? ` <span class="badge b-gris">Inactiva</span>` : ""}
           <div class="muted small">${esc(u.direccion || "")}${u.lat != null ? ` · ${(+u.lat).toFixed(4)}, ${(+u.lng).toFixed(4)}` : " · sin coordenadas"}</div></div>
-          <button class="btn chico" data-ed="${u.id}">Editar</button></div>`).join("") || `<div class="muted">Todavía no hay bases ni talleres.</div>`}</div>`
+          <button class="btn chico" data-ed="${u.id}">Editar</button></div>`).join("") || `<div class="muted">Todavía no hay bases, talleres ni campos.</div>`}</div>`
     });
     $$("[data-ed]").forEach(b => b.onclick = () => formUbicacion(D.ubicaciones.find(x => x.id === b.dataset.ed)));
   }
@@ -995,7 +1040,7 @@
       titulo: u.id ? "Editar ubicación" : "Nueva ubicación",
       cuerpo: `<form class="stack" id="f-u">
         <label class="campo"><span>Nombre *</span><input type="text" name="nombre" value="${esc(u.nombre || "")}"></label>
-        <label class="campo"><span>Tipo</span><select name="tipo"><option ${u.tipo === "Base" ? "selected" : ""}>Base</option><option ${u.tipo === "Taller" ? "selected" : ""}>Taller</option></select></label>
+        <label class="campo"><span>Tipo</span><select name="tipo">${TIPOS_FIJOS.map(t => `<option ${u.tipo === t ? "selected" : ""}>${t}</option>`).join("")}</select></label>
         <label class="campo"><span>Dirección o referencia</span><input type="text" name="direccion" value="${esc(u.direccion || "")}"></label>
         <div class="grid2"><label class="campo"><span>Latitud</span><input type="number" step="any" name="lat" value="${esc(u.lat ?? "")}"></label>
         <label class="campo"><span>Longitud</span><input type="number" step="any" name="lng" value="${esc(u.lng ?? "")}"></label></div>
@@ -1099,7 +1144,7 @@
       cuerpo: `<div class="card stack">
         <p style="margin:0">Genera un Excel con tres hojas: <b>Extintores</b>, <b>Inspecciones</b> y <b>Vencimientos</b>.</p>
         <label class="campo"><span>Ubicación o vehículo</span><select id="x-filtro"><option value="">Todos</option>
-          <optgroup label="Bases y talleres">${D.ubicaciones.map(u => `<option value="u:${u.id}">${esc(u.nombre)}</option>`).join("")}</optgroup>
+          <optgroup label="Bases, talleres y campos">${D.ubicaciones.map(u => `<option value="u:${u.id}">${esc(u.nombre)}</option>`).join("")}</optgroup>
           <optgroup label="Vehículos">${D.vehiculos.map(v => `<option value="v:${v.id}">${esc(v.patente)}</option>`).join("")}</optgroup></select></label>
         <div class="grid2">
           <label class="campo"><span>Inspecciones desde</span><input type="date" id="x-desde" value="${hace90}"></label>
@@ -1131,7 +1176,7 @@
         "Marca": e.marca || "", "Fecha de fabricación": aFecha(e.fecha_fabricacion), "Última recarga": aFecha(e.ultima_recarga), "Vencimiento de carga": aFecha(c.vencCarga),
         "Última PH": aFecha(e.ultima_ph), "Vencimiento de PH": aFecha(c.vencPh), "Tipo de ubicación": e.tipo_ubicacion || "", "Ubicación o patente": dondeEsta(e).replace(/^(Pickup|Trailer) /, ""),
         "Sector": e.sector || "", "Frecuencia": e.frecuencia_dias == 15 ? "Quincenal" : "Mensual", "Estado": e.estado || "", "Última inspección": e.ultima_inspeccion ? new Date(e.ultima_inspeccion) : null,
-        "Observado": e.observado ? "Sí" : "No", "Días al próximo vencimiento": c.dias ?? "", "Alarma": alarmaTxt(c), "Observaciones": e.observaciones || ""
+        "Observado": e.observado ? "Sí" : "No", "Días al próximo vencimiento": c.dias ?? "", "Alarma": alarmaTxt(c), "Fecha de baja": aFecha(e.fecha_baja), "Motivo de baja": e.motivo_baja || "", "Observaciones": e.observaciones || ""
       };
     });
     const d0 = desde || "0000-01-01", d1 = hasta || "9999-12-31";

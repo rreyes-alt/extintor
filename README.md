@@ -20,6 +20,8 @@ Sirve para recorrer las pantallas antes de crear las cuentas.
 | `js/config.js` | **Único archivo a editar**: datos de Supabase |
 | `sw.js`, `manifest.webmanifest`, `icons/` | Instalación en el celular y funcionamiento sin señal |
 | `supabase/schema.sql` | Crea la base de datos, permisos y checklist inicial |
+| `supabase/agregar_documentos.sql` | Agrega los documentos adjuntos a una base ya creada |
+| `supabase/actualizar_v1_2.sql` | Agrega el tipo de ubicación Campo y los datos de baja de extintores |
 | `scripts/alarmas.mjs` + `.github/workflows/alarmas.yml` | Mail diario de alarmas |
 
 ---
@@ -107,7 +109,7 @@ GitHub puede desactivar tareas programadas de repositorios sin cambios durante 6
 - *Más → Ubicaciones / Vehículos*: cargar bases, talleres (con GPS) y patentes.
 - *Extintores → +*: dar de alta cada equipo y tocar **Leer** para vincular su etiqueta NFC.
 - *Más → Usuarios → +*: crear operadores (mail + contraseña inicial). Editar para dar de baja o cambiar rol.
-- *Ficha del extintor*: registrar recarga o PH, cambiar NFC, resolver observaciones.
+- *Ficha del extintor*: registrar recarga o PH, cambiar NFC, resolver observaciones y **adjuntar documentos** (ficha técnica, certificados de recarga/PH, remitos) en JPG, PNG o PDF de hasta 10 MB.
 - *Más → Exportar a Excel*: hojas Extintores, Inspecciones y Vencimientos.
 
 **Operador**
