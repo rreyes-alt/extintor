@@ -1,8 +1,8 @@
 // =====================================================================
 // Alarmas diarias por mail — lo ejecuta GitHub Actions todos los días.
-//   • Vencidos y observados: aviso TODOS los días hasta que se actualicen.
-//   • Próximos a vencer (≤ 30 días) e inspecciones atrasadas: aviso los
-//     lunes, y además el día en que un extintor entra en los 30 días.
+//   • Primer aviso cuando faltan 5 días para el vencimiento (carga o PH).
+//   • Recordatorio el día en que vence.
+//   Nada más: lo demás (observados, inspecciones atrasadas) se ve en la app.
 // Secrets obligatorios (GitHub > Settings > Secrets and variables > Actions):
 //   SUPABASE_SERVICE_KEY, SMTP_USER, SMTP_PASS
 // Opcionales: SMTP_HOST (def. smtp.gmail.com), SMTP_PORT (def. 465), MAIL_FROM
@@ -13,7 +13,7 @@ import nodemailer from "nodemailer";
 const env = process.env;
 const URL_SB = (env.SUPABASE_URL || "").replace(/\/$/, "");
 const KEY = env.SUPABASE_SERVICE_KEY;
-const AVISO = Number(env.DIAS_AVISO || 30);
+const AVISO = Number(env.DIAS_AVISO || 5); // días de anticipación del primer aviso
 const APP = env.APP_URL || "";
 if (!URL_SB || !KEY) { console.error("Faltan SUPABASE_URL o SUPABASE_SERVICE_KEY"); process.exit(1); }
 
@@ -29,7 +29,6 @@ async function rest(path) {
 // Fecha de hoy en Argentina (UTC-3)
 const ahoraAR = new Date(Date.now() - 3 * 3600e3);
 const hoy = ahoraAR.toISOString().slice(0, 10);
-const esLunes = ahoraAR.getUTCDay() === 1;
 
 const sumarMeses = (f, n) => {
   if (!f) return null;
@@ -52,28 +51,19 @@ const donde = e => {
   const u = ubics.find(x => x.id === e.ubicacion_id); return u ? u.nombre : "—";
 };
 
-const vencidos = [], observados = [], proximos = [], nuevosProx = [], atrasados = [];
+const previos = [], hoyVencen = [];
 for (const e of exts) {
   const venc = [
     ["Carga", sumarMeses(e.ultima_recarga, e.meses_recarga || 12)],
-    ["PH", sumarMeses(e.ultima_ph, e.meses_ph || 60)]
+    ["Prueba hidráulica", sumarMeses(e.ultima_ph, e.meses_ph || 60)]
   ].filter(x => x[1]).map(([que, f]) => ({ que, f, d: dias(hoy, f) }));
   for (const v of venc) {
-    const fila = { e, ...v };
-    if (v.d < 0) vencidos.push(fila);
-    else if (v.d <= AVISO) { proximos.push(fila); if (v.d === AVISO) nuevosProx.push(fila); }
+    if (v.d === AVISO) previos.push({ e, ...v });   // primer aviso: faltan 5 días
+    if (v.d === 0) hoyVencen.push({ e, ...v });     // recordatorio: vence hoy
   }
-  if (e.observado) observados.push({ e });
-  const desde = e.ultima_inspeccion ? dias(e.ultima_inspeccion.slice(0, 10), hoy) : null;
-  if (desde === null || desde > (e.frecuencia_dias || 30)) atrasados.push({ e, desde });
 }
 
-const incluirSemanal = esLunes;
-const listaProx = incluirSemanal ? proximos : nuevosProx;
-const listaAtr = incluirSemanal ? atrasados : [];
-if (!vencidos.length && !observados.length && !listaProx.length && !listaAtr.length) {
-  console.log(`${hoy}: sin alarmas para enviar.`); process.exit(0);
-}
+if (!previos.length && !hoyVencen.length) { console.log(`${hoy}: sin alarmas para enviar.`); process.exit(0); }
 if (!perfiles.length) { console.log("No hay usuarios de Seguridad que reciban alarmas."); process.exit(0); }
 
 const tabla = (titulo, color, filas, cols) => !filas.length ? "" : `
@@ -82,17 +72,19 @@ const tabla = (titulo, color, filas, cols) => !filas.length ? "" : `
   <tr style="background:#f1f1f1">${cols.map(c => `<th align="left">${c[0]}</th>`).join("")}</tr>
   ${filas.map(f => `<tr style="border-bottom:1px solid #ddd">${cols.map(c => `<td>${esc(c[1](f))}</td>`).join("")}</tr>`).join("")}
   </table>`;
+const cols = [["Código", f => f.e.codigo], ["Ubicación", f => donde(f.e)], ["Sector", f => f.e.sector || ""], ["Qué vence", f => f.que], ["Fecha", f => fmt(f.f)]];
 
 const html = `<div style="max-width:720px">
   <h2 style="font-family:Arial;color:#c8211b">Alarmas de extintores — ${fmt(hoy)}</h2>
-  ${tabla("Vencidos", "#c8211b", vencidos.sort((a, b) => a.d - b.d), [["Código", f => f.e.codigo], ["Ubicación", f => donde(f.e)], ["Qué", f => f.que], ["Venció", f => fmt(f.f)], ["Hace", f => `${-f.d} días`]])}
-  ${tabla("Observados en la última inspección", "#c8211b", observados, [["Código", f => f.e.codigo], ["Ubicación", f => donde(f.e)], ["Sector", f => f.e.sector || ""]])}
-  ${tabla(incluirSemanal ? `Vencen en los próximos ${AVISO} días` : `Entraron en el aviso de ${AVISO} días`, "#b97600", listaProx.sort((a, b) => a.d - b.d), [["Código", f => f.e.codigo], ["Ubicación", f => donde(f.e)], ["Qué", f => f.que], ["Vence", f => fmt(f.f)], ["Faltan", f => `${f.d} días`]])}
-  ${tabla("Inspección atrasada", "#b97600", listaAtr, [["Código", f => f.e.codigo], ["Ubicación", f => donde(f.e)], ["Última", f => f.desde === null ? "Nunca" : `hace ${f.desde} días`]])}
-  <p style="font-family:Arial;font-size:13px;color:#666;margin-top:24px">Este aviso se repite hasta que se cargue la nueva fecha de recarga/PH, una inspección nueva o se resuelva la observación.
+  ${tabla("Vencen HOY", "#c8211b", hoyVencen, cols)}
+  ${tabla(`Vencen en ${AVISO} días`, "#b97600", previos, cols)}
+  <p style="font-family:Arial;font-size:13px;color:#666;margin-top:24px">Cada vencimiento se avisa dos veces: ${AVISO} días antes y el día en que vence. El estado completo está siempre en la app.
   ${APP ? `<br><a href="${APP}">Abrir la app</a>` : ""}</p></div>`;
 
-const asunto = `[Extintores] ${vencidos.length} vencidos · ${observados.length} observados · ${proximos.length} por vencer`;
+const partes = [];
+if (hoyVencen.length) partes.push(`${hoyVencen.length} vence${hoyVencen.length === 1 ? "" : "n"} hoy`);
+if (previos.length) partes.push(`${previos.length} vence${previos.length === 1 ? "" : "n"} en ${AVISO} días`);
+const asunto = `[Extintores] ${partes.join(" · ")}`;
 if (!env.SMTP_USER || !env.SMTP_PASS) { console.error("Faltan los secrets SMTP_USER o SMTP_PASS"); process.exit(1); }
 const tx = nodemailer.createTransport({
   host: env.SMTP_HOST || "smtp.gmail.com",
